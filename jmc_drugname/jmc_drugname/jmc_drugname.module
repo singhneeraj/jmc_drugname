@@ -1,0 +1,245 @@
+<?php
+/*
+ * Implements hook_help()
+ */
+function jmc_drugname_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#jmc_drugname':
+      $output = '';
+      $output .= '<h3>' . t('JMC Drug Name Abroad') . '</h3>';
+      $output .= '<p>' . t('While travelling abroad, a healthcare professional can search the name of a particular medicine in the destination country.') . '</p>';
+      return $output;
+  }
+}
+
+/*
+ * Implements hook_menu()
+ */
+function jmc_drugname_menu(){
+  $items = array();
+  $items['drugname'] = array(
+    'title' => 'Drug Name abroad',
+    'page callback' => 'dna',
+    'access callback' => TRUE,
+  );
+  return $items;
+}
+
+/*
+ * Implements menu callback for 'drugname'
+ */
+function dna(){
+  $form = drupal_get_form('dna_form');
+  return theme('dnapage',array('result' => $form));
+}
+
+/**
+ * Implements hook_theme().
+ */
+function jmc_drugname_theme(){
+  return array(
+    'dnapage' => array(
+    'template' => 'custom-dnapage', //file path of custom template of module.
+    )
+  );
+}
+
+/**
+ * Implements drupal form callback.
+ */
+function dna_form($form, &$form_state){
+  //FROM COUNTRY LIST..!!
+  $fromCountryResult = db_select('field_data_field_dna_country', 'fromCountry')
+    ->fields('fromCountry', array('field_dna_country_value'))
+    ->execute()
+    ->fetchCol();
+  $fromCountryResult = array_values(array_unique($fromCountryResult));
+
+  $fromCountry = array(t('--Select a Country--'));
+  foreach($fromCountryResult as $key => $value) {
+    $fromCountry[$value] = $value;
+  }
+
+  //Drug Name as per the FROM COUNTRY..!!
+  $fcountry = !empty($form_state['values']['from_country']) ? $fromCountry[$form_state['values']['from_country']] : 'United Kingdom';
+
+  $drugNameResult = db_select('field_data_field_dna_country', 'fromCountry');
+  $drugNameResult -> leftJoin('node','n','n.nid = fromCountry.entity_id');
+  $drugNameResult -> leftJoin('field_revision_field_dna_mfmp','mfmp','n.nid = mfmp.entity_id');
+  $drugNameResult->condition('n.status', 1,'=')
+    ->condition('fromCountry.field_dna_country_value ', $fcountry,'=')
+    ->havingCondition('count_1', 5, '=');
+
+  $subquery = '(SELECT COUNT(mfmp_1.field_dna_mfmp_value) FROM {field_data_field_dna_country} AS fromCountry
+LEFT OUTER JOIN {node} n ON n.nid = fromCountry.entity_id
+LEFT OUTER JOIN {field_revision_field_dna_mfmp} mfmp_1 ON n.nid = mfmp_1.entity_id
+WHERE (n.status = :db_condition_placeholder_count_0 AND mfmp_1.field_dna_mfmp_value = mfmp.field_dna_mfmp_value)
+GROUP BY mfmp_1.field_dna_mfmp_value)';
+
+  $drugNameResult -> fields('n', array('title', 'nid'))
+    -> fields('mfmp', array('field_dna_mfmp_value'))
+    ->addExpression($subquery, 'count_1', array(':db_condition_placeholder_count_0' => 1));
+
+
+  $drugNameResult = $drugNameResult->execute()->fetchAll();
+  $drugNameCode = array(t('--Select a Medication--'));
+  foreach($drugNameResult as $key => $value) {
+    $drugNameCode[base64_encode($value->field_dna_mfmp_value)] = $value->title;
+  }
+
+  //To COUNTRY as per the Drug Name and from country..!!
+    $mfmp = !empty($form_state['values']['drug_name']) ? base64_decode($form_state['values']['drug_name']) : '';
+    $toCountryResult = db_select('field_data_field_dna_country', 'toCountry');
+    $toCountryResult -> leftJoin('node','n','n.nid = toCountry.entity_id');
+    $toCountryResult -> leftJoin('field_revision_field_dna_mfmp','mfmp','n.nid = mfmp.entity_id');
+    $toCountryResult -> fields('toCountry', array('field_dna_country_value'))
+                     -> fields('mfmp', array('field_dna_mfmp_value'))
+                     ->condition('mfmp.field_dna_mfmp_value', "$mfmp",'=')
+                     ->condition('toCountry.field_dna_country_value', $fcountry, '<>');
+  $toCountryResult = $toCountryResult->execute()->fetchCol();
+  $toCountryResult = array_values(array_unique($toCountryResult));
+
+  $toCountry = array(t('--Select a Country--'));
+  foreach ($toCountryResult as $key => $value) {
+    $toCountry[$value] = $value;
+  }
+
+// build form array()
+  $form = array();
+  $form['from_country'] = array(
+    '#type' => 'select',
+    '#title' => t('Country in which you live:'),
+    '#options' => $fromCountry,
+    '#default_value' => 'United Kingdom',
+    '#ajax' => array(
+      'callback' => 'ajax_drug_name_callback',
+      'wrapper' => 'drug_name_wrapper',
+    ),
+  );
+  $form['drug_name'] = array(
+    '#type' => 'select',
+    '#title' => t('Medication you use: '),
+    '#options' => $drugNameCode,
+    '#prefix' => '<div id="drug_name_wrapper">',
+    '#suffix' => '</div>',
+    '#ajax' => array(
+      'callback' => 'ajax_to_country_callback',
+      'wrapper' => 'to_country_wrapper',
+    ),
+  );
+  $form['to_country'] = array(
+    '#type' => 'select',
+    '#title' => t('Country you are going to: '),
+    '#options' => $toCountry,
+    '#prefix' => '<div id="to_country_wrapper">',
+    '#suffix' => '</div>',
+  );
+  $form['search'] = array(
+    '#type' => 'submit',
+    '#value' => t('Search'),
+    '#prefix' => '<div id="search_button_wrapper">',
+    '#suffix' => '</div>',
+    '#ajax' => array(
+      'callback' => 'ajax_dna_search_result_callback',
+      'wrapper' => 'search_result_wrapper',
+      'method' => 'replace',
+    ),
+  );
+  $form['wrapper'] = array(
+    '#markup' => '<div id="search_result_wrapper"></div>',
+  );
+return $form;
+}
+
+/**
+ * Implements ajax callback for 'from_country' to fill 'drug_name' list.
+ */
+function ajax_drug_name_callback($form, $form_state){
+  return $form['drug_name'];
+}
+
+/**
+ * Implements ajax callback for 'drug_name' to fill 'to_country'.
+ */
+function ajax_to_country_callback($form, $form_state){
+  return $form['to_country'];
+}
+
+/**
+ * Implements ajax callback for 'search' button to get search result.
+ */
+function ajax_dna_search_result_callback($form, &$form_state) {
+  $fromCountry = $form_state['values']['from_country'];
+  $drugId = base64_decode($form_state['values']['drug_name']);
+  $toCountry = $form_state['values']['to_country'];
+
+  $drugNameInput = db_select('field_data_field_dna_country', 'fromCountry');
+  $drugNameInput -> leftJoin('node','n','n.nid = fromCountry.entity_id');
+  $drugNameInput -> leftJoin('field_revision_field_dna_mfmp','mfmp','n.nid = mfmp.entity_id');
+
+  $drugNameInput -> fields('n', array('title', 'nid'))
+    -> fields('fromCountry', array('field_dna_country_value'))
+    -> fields('mfmp', array('field_dna_mfmp_value'))
+    ->condition('n.status', 1,'=')
+    ->condition('mfmp.field_dna_mfmp_value', $drugId ,'=')
+    ->condition('fromCountry.field_dna_country_value ', $fromCountry,'=');
+  $drugNameInput = $drugNameInput->execute()->fetchAll();
+
+  $drugNameOutput = db_select('field_data_field_dna_country', 'toCountry');
+  $drugNameOutput -> leftJoin('node','n','n.nid = toCountry.entity_id');
+  $drugNameOutput -> leftJoin('field_revision_field_dna_mfmp','mfmp','n.nid = mfmp.entity_id');
+
+  $drugNameOutput -> fields('n', array('title', 'nid'))
+    -> fields('toCountry', array('field_dna_country_value'))
+    -> fields('mfmp', array('field_dna_mfmp_value'))
+    ->condition('n.status', 1,'=')
+    ->condition('mfmp.field_dna_mfmp_value', $drugId ,'=')
+    ->condition('toCountry.field_dna_country_value ', $toCountry,'=');
+  $drugNameOutput = $drugNameOutput->execute()->fetchAll();
+
+  $outputMarkup = "";
+  $outputMarkup = "<br/><div id='search_result_wrapper'>";
+  $outputMarkup .= "<table cellspacing='0' cellpadding='0' border='2'>
+                  <tbody><tr>
+                  <td class='tabl_descri'>Country in which you live: <b>";
+  $outputMarkup .= $fromCountry;
+  $outputMarkup .="</b></td>
+                  <td class='tabl_descri'>Country you are going to: <b>";
+  $outputMarkup .= $toCountry;
+  $outputMarkup .="</b></td>
+                  </tr><tr>
+                  <td class='inner-box'>
+                  <h3>Medication you use:<p class='items-arr'> ";
+
+  for($i=0;$i<count($drugNameInput); $i++) {
+    $outputMarkup .= "- ".$drugNameInput[$i]->title;
+    $outputMarkup .= "</br>";
+  }
+  $outputMarkup .= "</p></h3>
+                    </td>
+                    <td class='inner-box'>
+                    <h3>Medication name abroad:<p class='items-arr'> ";
+
+  for($i=0;$i<count($drugNameOutput); $i++) {
+    $outputMarkup .= "- ".$drugNameOutput[$i]->title;
+    $outputMarkup .= "</br>";
+  }
+  $outputMarkup .= "</h3></p></td></tr></tbody></table></div><br/>";
+
+  $form["wrapper"] = array(
+    "#markup" => $outputMarkup
+  );
+  return $form["wrapper"];
+}
+
+/**
+ * Implements hook_submit().
+ */
+function dna_form_submit($form, $form_state){
+}
+
+/**
+ * Implements hook_validate().
+ */
+function dna_form_validate($form, $form_state){
+}

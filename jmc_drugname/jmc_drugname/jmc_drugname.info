@@ -1,0 +1,4 @@
+name = Drug Name abroad
+description = Custom module for Drug Name abroad
+core = 7.x
+package = jmc custom

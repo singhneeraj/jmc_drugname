@@ -1,0 +1,24 @@
+.container-inline {
+  display: inline;
+}
+
+.tabl_descri {
+    background: #00a0df none repeat scroll 0 0;
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 10px;
+    text-align: center;
+    width: 50%;
+}
+.items-arr{
+    font:12px/14px Arial;
+}
+.innerbox{
+  padding:10px;
+}
+.innerbox h3{
+  color: #000;
+  font: bold 16px Arial;
+  text-align: center;
+}
